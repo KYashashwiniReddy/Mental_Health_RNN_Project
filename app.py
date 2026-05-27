@@ -1,114 +1,191 @@
-# ================= IMPORTS =================
-
 import streamlit as st
-import pickle
+import tensorflow as tf
 import numpy as np
+import pickle
 import re
-import matplotlib.pyplot as plt
-
 import nltk
+import pandas as pd
+import matplotlib.pyplot as plt
+import plotly.express as px
+
 from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 
-# ================= NLTK SETUP =================
+nltk.download("stopwords")
 
-nltk.download('punkt')
-nltk.download('punkt_tab')
-nltk.download('stopwords')
+stop_words = set(stopwords.words("english"))
+MAX_LEN = 100
 
-# ================= LOAD FILES =================
+# ================= THEME STYLE =================
+st.set_page_config(
+    page_title="Mental Health AI",
+    page_icon="🧠",
+    layout="wide"
+)
 
-with open("tokenizer.pkl", "rb") as f:
-    tokenizer = pickle.load(f)
+st.markdown("""
+<style>
+.main {
+    background-color: #0f172a;
+    color: white;
+}
 
-with open("label_encoder.pkl", "rb") as f:
-    encoder = pickle.load(f)
+h1, h2, h3 {
+    color: #38bdf8;
+}
 
-max_length = 50
-stop_words = set(stopwords.words('english'))
+.stButton>button {
+    background: linear-gradient(90deg,#06b6d4,#3b82f6);
+    color: white;
+    border-radius: 10px;
+    padding: 10px 20px;
+    font-size: 16px;
+}
+
+.stTextArea textarea {
+    border-radius: 10px;
+    background-color: #1e293b;
+    color: white;
+}
+
+.card {
+    padding: 20px;
+    border-radius: 15px;
+    background-color: #1e293b;
+    margin-bottom: 10px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ================= LOAD MODEL =================
+
+@st.cache_resource
+def load_resources():
+    model = load_model("mental_health_rnn_model.keras")
+
+    with open("tokenizer.pkl", "rb") as f:
+        tokenizer = pickle.load(f)
+
+    with open("label_encoder.pkl", "rb") as f:
+        encoder = pickle.load(f)
+
+    return model, tokenizer, encoder
+
+model, tokenizer, encoder = load_resources()
 
 # ================= PREPROCESS =================
 
 def preprocess_text(text):
     text = text.lower()
-    text = re.sub(r'[^a-zA-Z\s]', '', text)
-    tokens = word_tokenize(text)
-    tokens = [w for w in tokens if w not in stop_words]
-    return " ".join(tokens)
+    text = re.sub(r"[^\w\s]", "", text)
+    words = [w for w in text.split() if w not in stop_words]
+    return " ".join(words)
 
-# ================= SIMPLE RULE-BASED MODEL (REPLACES RNN) =================
-# (This is needed because TensorFlow is NOT supported in Streamlit Cloud)
+# ================= PREDICT =================
 
 def predict_sentiment(text):
+    processed = preprocess_text(text)
 
-    text = text.lower()
+    seq = tokenizer.texts_to_sequences([processed])
+    padded = pad_sequences(seq, maxlen=MAX_LEN, padding="post")
 
-    if any(word in text for word in ["sad", "depress", "lonely", "tired", "stress", "anxious"]):
-        return "Stress", 0.85
+    pred = model.predict(padded, verbose=0)[0]
 
-    elif any(word in text for word in ["happy", "excited", "good", "great", "awesome"]):
-        return "Happy", 0.90
+    idx = np.argmax(pred)
+    label = encoder.inverse_transform([idx])[0]
+    confidence = pred[idx]
 
-    else:
-        return "Neutral", 0.70
+    probs = dict(zip(encoder.classes_, pred))
 
-# ================= UI =================
+    return label, confidence, probs, processed
 
-st.title("AI-Based Mental Health Sentiment Monitoring System")
-st.subheader("Emotion Detection System")
+# ================= SIDEBAR =================
 
-st.header("About the Project")
-st.write("""
-This system detects emotional sentiment from user text.
-It helps monitor mental well-being using NLP techniques.
-""")
+st.sidebar.title("🧠 Mental Health AI")
+menu = st.sidebar.radio("Navigate", ["🏠 Home", "ℹ About", "🔍 Prediction"])
 
-# ================= INPUT =================
+# ================= HOME =================
 
-st.header("Enter Your Thoughts")
+if menu == "🏠 Home":
 
-user_input = st.text_area("Enter your thoughts or feelings here...")
+    st.markdown("<h1>AI Mental Health Monitoring System</h1>", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="card">
+    Detect emotions from text using AI-powered sentiment analysis.
+    Get insights, confidence scores, and wellness suggestions.
+    </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("AI Model", "RNN")
+    col2.metric("Input Type", "Text")
+    col3.metric("Output", "Emotion")
+
+# ================= ABOUT =================
+
+if menu == "ℹ About":
+
+    st.markdown("<h2>About This Project</h2>", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="card">
+    <b>Emotional AI:</b> Detects human emotions from text<br><br>
+
+    <b>NLP Uses:</b> Mental health tracking, sentiment analysis<br><br>
+
+    <b>RNN Role:</b> Learns sequence patterns in sentences
+    </div>
+    """, unsafe_allow_html=True)
 
 # ================= PREDICTION =================
 
-if st.button("Analyze Emotion"):
+if menu == "🔍 Prediction":
 
-    if user_input.strip():
+    st.markdown("<h2>Emotion Detection</h2>", unsafe_allow_html=True)
 
-        cleaned = preprocess_text(user_input)
+    st.markdown("### Enter your thoughts")
 
-        label, confidence = predict_sentiment(cleaned)
+    user_input = st.text_area("Write here...", height=150)
 
-        st.success(f"Emotion Detected: {label}")
-        st.info(f"Confidence Score: {confidence * 100:.2f}%")
+    if st.button("Analyze Emotion 🚀"):
 
-        # ================= GRAPH =================
-
-        st.header("Emotion Visualization")
-
-        emotions = ["Stress", "Happy", "Neutral"]
-        values = [0.85 if label == e else 0.2 for e in emotions]
-
-        fig, ax = plt.subplots()
-        ax.bar(emotions, values)
-        ax.set_ylabel("Probability")
-        ax.set_title("Emotion Distribution")
-
-        st.pyplot(fig)
-
-        # ================= GUIDANCE =================
-
-        st.header("Emotional Guidance")
-
-        if label == "Stress":
-            st.warning("Take a break and talk to someone you trust.")
-            st.write("Try deep breathing, walking, or listening to music.")
-
-        elif label == "Happy":
-            st.success("Great! Keep maintaining your positive mindset.")
-
+        if user_input.strip() == "":
+            st.warning("Please enter text")
         else:
-            st.info("Stay balanced and take care of your mental health.")
 
-    else:
-        st.error("Please enter some text")
+            emotion, confidence, probs, processed = predict_sentiment(user_input)
+
+            st.markdown("### Result")
+
+            st.success(f"Emotion: {emotion}")
+
+            st.metric("Confidence", f"{confidence*100:.2f}%")
+
+            st.markdown("### AI Suggestion")
+
+            st.info("Take care of your mental well-being ❤️")
+
+            # ================= CHART =================
+
+            df = pd.DataFrame({
+                "Emotion": list(probs.keys()),
+                "Probability": list(probs.values())
+            })
+
+            fig = px.bar(
+                df,
+                x="Emotion",
+                y="Probability",
+                color="Probability",
+                color_continuous_scale="blues"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+# ================= FOOTER =================
+
+st.sidebar.markdown("---")
+st.sidebar.write("Built with ❤️ using Streamlit + AI")
