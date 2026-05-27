@@ -1,7 +1,7 @@
 streamlit
-tensorflow-cpu
 numpy
+pandas
+scikit-learn
 matplotlib
 nltk
-scikit-learn
-pandas
+pickle-mixin
